@@ -5,7 +5,7 @@
 # directory (see README.md):
 #
 #   NMAP_SOURCE_DIR     nmap source tree, e.g. sources/nmap-7.993
-#   OPENSSL_SOURCE_DIR  OpenSSL 3.x source tree, e.g. sources/openssl-3.5.8
+#   OPENSSL_SOURCE_DIR  OpenSSL 3.x source tree, e.g. sources/openssl-3.5.9
 #   ALPINE_DIR          Alpine minirootfs tarball + apk/ build packages
 #                       (default: sources/alpine-3.22)
 #
@@ -41,7 +41,7 @@ Options:
   -h, --help         show this help
 
 Example:
-  $(basename "$0") sources/nmap-7.993 sources/openssl-3.5.8
+  $(basename "$0") sources/nmap-7.993 sources/openssl-3.5.9
 EOF
 }
 

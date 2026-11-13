@@ -121,7 +121,7 @@ The script downloads only what `sources/` is missing:
 ```
 sources/
   nmap-7.993/                  nmap source; tarball GPG-checked against nmap-signing-key.asc
-  openssl-3.5.8/               OpenSSL source; SHA-256 pinned in the script
+  openssl-3.5.9/               OpenSSL source; SHA-256 pinned in the script
   alpine-3.22/
     alpine-minirootfs-3.22.8-x86_64.tar.gz    build container base; SHA-256 pinned
     apk/                       build packages (gcc, make, perl, zlib, ...); apk checks signatures
@@ -137,7 +137,7 @@ sources/
 ### Build
 
 ```sh
-./build_nmap_static.sh sources/nmap-7.993 sources/openssl-3.5.8
+./build_nmap_static.sh sources/nmap-7.993 sources/openssl-3.5.9
 ```
 
 The build runs in Docker with networking disabled, so it works fully offline.
