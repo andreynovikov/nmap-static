@@ -195,6 +195,6 @@ jobs:
           fi
           # Upload as a draft first, so a failed upload never looks like a finished build.
           gh release create "$VERSION" --draft --target "$GITHUB_SHA" \
-            --title "Nmap $VERSION (static, linux x86_64)" --notes-file notes.md \
+            --title "Nmap $VERSION (static)" --notes-file notes.md \
             "dist/$DIST_NAME.tar.gz" dist/SHA256SUMS
           gh release edit "$VERSION" --draft=false --latest="$IS_LATEST"

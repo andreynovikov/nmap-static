@@ -1,5 +1,7 @@
 # nmap-static
 
+[![Static nmap release](https://github.com/andreynovikov/nmap-static/actions/workflows/release.yml/badge.svg)](https://github.com/andreynovikov/nmap-static/actions/workflows/release.yml)
+
 This repository provides statically linked [nmap](https://nmap.org), ncat and nping
 for x86_64 Linux. A workflow builds every new stable nmap release automatically.
 
