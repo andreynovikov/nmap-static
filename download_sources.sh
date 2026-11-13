@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# Copyright (c) 2026 Andrey Novikov
+# Licensed under the Nmap Public Source License v0.95; see LICENSE and NOTICE.
+#
 # Populate sources/ with everything build_nmap_static.sh needs, downloading
 # only what is missing:
 #
@@ -41,7 +44,7 @@ NMAP_KEY="$SCRIPT_DIR/nmap-signing-key.asc"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [-n NMAP_VERSION] [SOURCES_DIR]
+Usage: $(basename "$0") [-n NMAP_VERSION] [-k] [SOURCES_DIR]
 
 Downloads whatever build_nmap_static.sh needs and SOURCES_DIR does not have yet
 (default: ${SCRIPT_DIR}/sources):
@@ -51,6 +54,9 @@ Downloads whatever build_nmap_static.sh needs and SOURCES_DIR does not have yet
 
 Options:
   -n, --nmap-version VER   nmap release to fetch (GPG-verified), e.g. 7.993
+  -k, --keep-archives      keep the verified nmap and OpenSSL tarballs (and
+                           nmap's signature) in SOURCES_DIR, e.g. to publish
+                           the source code next to the binaries
   -h, --help               show this help
 
 OpenSSL and Alpine versions and checksums are pinned at the top of this script.
@@ -62,9 +68,11 @@ log() { echo "==> $*" >&2; }
 
 NMAP_VERSION=$NMAP_DEFAULT_VERSION
 SOURCES=""
+KEEP_ARCHIVES=0
 while [ $# -gt 0 ]; do
     case "$1" in
         -n|--nmap-version) [ $# -ge 2 ] || die "$1 needs an argument"; NMAP_VERSION=$2; shift 2 ;;
+        -k|--keep-archives) KEEP_ARCHIVES=1; shift ;;
         -h|--help)         usage; exit 0 ;;
         -*)                usage >&2; die "unknown option: $1" ;;
         *)                 [ -z "$SOURCES" ] || die "only one sources directory may be given"
@@ -115,6 +123,7 @@ verify_sha256() {
 # verify_nmap_signature FILE
 #   FILE must carry a valid signature by the pinned Nmap Project Signing Key.
 #   Uses a throwaway GnuPG home, so the user's keyring is never touched.
+#   The signature is left next to FILE as FILE.asc.
 verify_nmap_signature() {
     local file=$1 sig="$1.asc" gnupg="$WORK/gnupg"
     log "downloading $NMAP_SIG_URL"
@@ -131,7 +140,7 @@ verify_nmap_signature() {
         || die "GPG signature check failed for ${file##*/}"
     log "good signature by the Nmap Project Signing Key"
     gpgconf --homedir "$gnupg" --kill all >/dev/null 2>&1 || true
-    rm -rf -- "$gnupg" "$sig"
+    rm -rf -- "$gnupg"
 }
 
 # source_tree NAME URL MARKER_FILE VERIFIER [VERIFIER_ARGS...]
@@ -154,8 +163,16 @@ source_tree() {
     tar -C "$WORK/$name.x" -xf "$tarball"
     [ -f "$WORK/$name.x/$name/$marker" ] || die "${url##*/} did not unpack to $name/"
     mv -- "$WORK/$name.x/$name" "$dest"
-    rm -rf -- "$tarball" "$WORK/$name.x"
+    rm -rf -- "$WORK/$name.x"
     SUMMARY+=("downloaded  $dest")
+    if [ "$KEEP_ARCHIVES" = 1 ]; then
+        local f
+        for f in "$tarball" "$tarball.asc"; do
+            [ -f "$f" ] || continue
+            mv -- "$f" "$SOURCES/"
+            SUMMARY+=("kept        $SOURCES/${f##*/}")
+        done
+    fi
 }
 
 # ------------------------------------------------------------- source trees --

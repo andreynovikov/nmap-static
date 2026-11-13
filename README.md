@@ -9,6 +9,10 @@ The binaries need nothing at runtime: musl libc, OpenSSL 3.5 LTS, libssh2,
 Lua/NSE and libpcap are all built in. They run on any x86_64 Linux system,
 including ones without glibc.
 
+This is an unofficial build of the unmodified Nmap sources. It is not
+affiliated with or endorsed by the Nmap Project; official releases are at
+https://nmap.org/. See [License](#license).
+
 ## Download
 
 Get the archive from [Releases](https://github.com/andreynovikov/nmap-static/releases).
@@ -26,10 +30,15 @@ anywhere: `nmap-7.993/bin/nmap` finds its scripts and data next to itself.
 ncat looks for its CA bundle only under `/usr/local`; elsewhere it falls back to
 the system's CA certificates.
 
+The archive's `share/doc/nmap/` holds Nmap's license, a NOTICE, and the
+licenses of all statically linked libraries. Each release also carries the
+exact source code it was built from: the official nmap tarball with its GPG
+signature, and the OpenSSL tarball.
+
 To verify a download:
 
 ```sh
-sha256sum -c SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
 gh attestation verify nmap-7.993-linux-x86_64-static.tar.gz -R andreynovikov/nmap-static
 ```
 
@@ -99,6 +108,7 @@ doesn't, GitHub emails a warning first, and one click re-enables the workflow.
 | `build_nmap_static.sh` | Builds into `output/<version>/` (fully offline) |
 | `test_nmap_static.sh` | Smoke-tests a build |
 | `nmap-signing-key.asc` | Nmap Project Signing Key, for checking nmap tarballs |
+| `licenses/` | License texts that the build installs and that aren't in the source trees (musl, LPeg, GCC runtime exception) |
 
 ### Prerequisites
 
@@ -115,6 +125,10 @@ doesn't, GitHub emails a warning first, and one click re-enables the workflow.
 ./download_sources.sh                      # default nmap release (pinned in the script)
 ./download_sources.sh --nmap-version 7.993 # any other nmap release
 ```
+
+With `--keep-archives`, the verified nmap and OpenSSL tarballs (and nmap's
+signature) are kept in `sources/`. That's how releases get the exact source
+archives to publish next to the binaries.
 
 The script downloads only what `sources/` is missing:
 
@@ -201,3 +215,19 @@ These affect regular nmap builds too:
 - **`ssh-hostkey` prints nothing against OpenSSH 10 and newer** with default
   settings. nmap's SSH library only supports finite-field Diffie-Hellman key
   exchange, which those servers no longer offer.
+
+## License
+
+Nmap, Ncat and Nping are Copyright (c) Nmap Software LLC and licensed under
+the [Nmap Public Source License](https://nmap.org/npsl/) (NPSL v0.95). The
+releases contain them unmodified, together with that license, the exact
+source code they were built from, and the licenses of all statically linked
+libraries. [NOTICE](NOTICE) lists those libraries and their licenses.
+
+This repository's own files are licensed under the same NPSL; see
+[LICENSE](LICENSE). Nmap's license counts software built to run Nmap and
+parse its results as a derivative work, which includes the test script, so
+everything here stays under Nmap's terms.
+
+Nmap is a trademark of Nmap Software LLC. This project is not affiliated
+with, sponsored by, or endorsed by Nmap Software LLC or the Nmap Project.

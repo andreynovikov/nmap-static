@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# Copyright (c) 2026 Andrey Novikov
+# Licensed under the Nmap Public Source License v0.95; see LICENSE and NOTICE.
+#
 # plan-release.sh VERSION
 #
 # Decide whether nmap VERSION needs a build, and under which release tag.

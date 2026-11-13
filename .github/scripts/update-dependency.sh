@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# Copyright (c) 2026 Andrey Novikov
+# Licensed under the Nmap Public Source License v0.95; see LICENSE and NOTICE.
+#
 # update-dependency.sh openssl|alpine
 #
 # Look for a newer patch release of a build input pinned in

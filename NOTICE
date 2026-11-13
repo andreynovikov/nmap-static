@@ -1,0 +1,72 @@
+nmap-static
+Copyright (c) 2026 Andrey Novikov
+
+This repository contains the scripts and workflows that build statically
+linked Nmap, Ncat and Nping. Its files are licensed under the Nmap Public
+Source License version 0.95 (NPSL), the license of Nmap itself; see
+LICENSE. Nmap's licensor counts software designed to run Nmap and parse its
+results as a derivative work of Nmap (NPSL section 3), so these scripts are
+distributed under the same terms.
+
+
+Nmap, Ncat and Nping
+--------------------
+
+The binaries published in this repository's releases are built from the
+unmodified official Nmap source releases at https://nmap.org/dist/. Each
+tarball's GPG signature is checked against the Nmap Project Signing Key
+before the build.
+
+Nmap is Copyright (c) Nmap Software LLC and its contributors, and is licensed
+under the NPSL (https://nmap.org/npsl/). The Nmap Reference Guide (the man
+pages) is also available under the Creative Commons Attribution License 3.0.
+
+Each release carries the exact source code its binaries were built from:
+the official Nmap source tarball with its signature, and the OpenSSL source
+tarball. The scripts that control the build are in this repository, at the
+release's tag.
+
+
+Third-party components
+----------------------
+
+The binaries statically link the following components. Their full license
+texts are in share/doc/nmap/THIRD-PARTY-LICENSES in every release archive.
+
+  Component            Obtained from          License
+  OpenSSL              openssl.org            Apache-2.0
+  libpcap              bundled with Nmap      BSD-3-Clause
+  libdnet              bundled with Nmap      BSD-3-Clause
+  PCRE2                bundled with Nmap      BSD-3-Clause WITH PCRE2-exception
+  libssh2              bundled with Nmap      BSD-3-Clause
+  LIBLINEAR            bundled with Nmap      BSD-3-Clause
+  Lua, LPeg            bundled with Nmap      MIT
+  zlib                 Alpine Linux           Zlib
+  musl libc            Alpine Linux           MIT
+  libgcc, libstdc++    Alpine Linux (GCC)     GPL-3.0-or-later WITH GCC-exception-3.1
+
+Nmap's license explicitly permits linking with OpenSSL (NPSL section 11).
+
+The licenses/ directory of this repository holds the license texts of musl,
+LPeg and the GCC Runtime Library Exception. They are not part of the source
+trees the build uses, so the build takes them from there.
+
+
+Trademarks and affiliation
+--------------------------
+
+Nmap is a trademark of Nmap Software LLC. This project is not affiliated
+with, sponsored by, or endorsed by Nmap Software LLC or the Nmap Project.
+The name Nmap is used only to describe the origin of the software, as
+section 7 of the NPSL permits. Official Nmap releases are available from
+https://nmap.org/.
+
+Companies that want to embed Nmap in their own products should see the
+Nmap OEM license at https://nmap.org/oem/.
+
+
+No warranty
+-----------
+
+This software is provided "AS IS", without warranties or conditions of any
+kind. See section 5 of the NPSL and the GPL in its Exhibit A.

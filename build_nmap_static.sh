@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# Copyright (c) 2026 Andrey Novikov
+# Licensed under the Nmap Public Source License v0.95; see LICENSE and NOTICE.
+#
 # Build fully static (musl) nmap, ncat and nping and install them into
 # output/<nmap version>/. Works fully offline: every input is a local
 # directory (see README.md):
@@ -18,11 +21,15 @@
 # libcrypto ("no-module"): a static binary cannot load legacy.so, and NSE needs
 # those algorithms for SMB/NTLM and others.
 #
+# Every build gets share/doc/nmap/ with Nmap's license (NPSL), a NOTICE and
+# the licenses of all statically linked libraries, as redistribution requires.
+#
 # Requirements: bash, Docker with BuildKit (the default since Docker 23).
 
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_URL=https://github.com/andreynovikov/nmap-static
 
 usage() {
     cat <<EOF
@@ -232,6 +239,101 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ------------------------------------------------------- license texts --
+#
+# Binary redistribution requires Nmap's license and the license notices of
+# everything statically linked. Collected here, before the long build, so a
+# missing text fails fast; installed into share/doc/nmap/ after the build.
+
+# Versions of the Alpine packages that end up inside the binaries.
+read -r MUSL_PKG ZLIB_PKG GCC_PKG < <(docker run --rm --network=none "$BUILDER_IMAGE" sh -c '
+    for p in musl zlib-static libgcc; do
+        apk info -v 2>/dev/null | sed -n "s/^$p-\([0-9][^ ]*\)\$/\1/p"
+    done | tr "\n" " "; echo')
+[ -n "${GCC_PKG:-}" ] || die "cannot read the musl/zlib/gcc versions from ${BUILDER_IMAGE}"
+
+# name|license|file with the license text
+THIRD_PARTY=(
+    "OpenSSL $OPENSSL_VERSION|Apache-2.0|$OPENSSL_SRC/LICENSE.txt"
+    "libpcap (bundled with Nmap)|BSD-3-Clause|$NMAP_SRC/libpcap/LICENSE"
+    "libdnet (bundled with Nmap)|BSD-3-Clause|$NMAP_SRC/libdnet-stripped/LICENSE"
+    "PCRE2 (bundled with Nmap)|BSD-3-Clause WITH PCRE2-exception|$NMAP_SRC/libpcre/LICENCE.md"
+    "libssh2 (bundled with Nmap)|BSD-3-Clause|$NMAP_SRC/libssh2/COPYING"
+    "LIBLINEAR (bundled with Nmap)|BSD-3-Clause|$NMAP_SRC/liblinear/COPYRIGHT"
+    "Lua (bundled with Nmap)|MIT|$NMAP_SRC/liblua/lua.h"
+    "LPeg (bundled with Nmap)|MIT|$SCRIPT_DIR/licenses/LPeg"
+    "zlib $ZLIB_PKG (Alpine Linux)|Zlib|$NMAP_SRC/libz/LICENSE"
+    "musl libc $MUSL_PKG (Alpine Linux)|MIT|$SCRIPT_DIR/licenses/musl-COPYRIGHT"
+    "libgcc, libstdc++ $GCC_PKG (Alpine Linux, from GCC)|GPL-3.0-or-later WITH GCC-exception-3.1|$SCRIPT_DIR/licenses/GCC-RUNTIME-LIBRARY-EXCEPTION-3.1"
+)
+
+# license_text FILE: the license text in FILE (Lua's is a comment in lua.h).
+license_text() {
+    case "$1" in
+        */lua.h) sed -n '/^\* Copyright (C) 1994-/,/^\*\*\*\*\*/p' "$1" | sed -e '$d' -e 's/^\* \{0,1\}//' ;;
+        *)       cat -- "$1" ;;
+    esac
+}
+
+[ -f "$NMAP_SRC/LICENSE" ] || die "Nmap's license is missing: $NMAP_SRC/LICENSE"
+for entry in "${THIRD_PARTY[@]}"; do
+    file=${entry##*|}
+    [ -f "$file" ] && [ -n "$(license_text "$file")" ] || die "license text missing: $file"
+done
+
+# install_license_docs DIR: write DIR/share/doc/nmap/{LICENSE,NOTICE,THIRD-PARTY-LICENSES}.
+install_license_docs() {
+    local doc="$1/share/doc/nmap" entry name license file rule
+    rule=$(printf '=%.0s' $(seq 1 76))
+    mkdir -p -- "$doc"
+    cp -- "$NMAP_SRC/LICENSE" "$doc/LICENSE"
+    {
+        echo "Licenses of the third-party components statically linked into nmap,"
+        echo "ncat and nping. Nmap itself is licensed under the NPSL: see LICENSE."
+        for entry in "${THIRD_PARTY[@]}"; do
+            IFS='|' read -r name license file <<<"$entry"
+            printf '\n%s\n%s\nLicense: %s\n\n' "$rule" "$name" "$license"
+            license_text "$file"
+        done
+    } > "$doc/THIRD-PARTY-LICENSES"
+    {
+        cat <<EOF
+Nmap ${NMAP_VERSION}: nmap, ncat and nping, statically linked for x86_64 Linux
+
+Nmap is Copyright (c) Nmap Software LLC and its contributors, and is
+licensed under the Nmap Public Source License version 0.95 (NPSL): see
+LICENSE in this directory and https://nmap.org/npsl/. The man pages (the
+Nmap Reference Guide) are also available under the Creative Commons
+Attribution License 3.0.
+
+These binaries were built from the unmodified official Nmap source release
+nmap-${NMAP_VERSION}.tar.bz2 (https://nmap.org/dist/) with the scripts at
+${PROJECT_URL}
+The releases there also carry the exact source code each build used: the
+Nmap source tarball with its GPG signature, and the OpenSSL source tarball.
+
+Statically linked third-party components (full license texts in
+THIRD-PARTY-LICENSES):
+
+EOF
+        for entry in "${THIRD_PARTY[@]}"; do
+            IFS='|' read -r name license file <<<"$entry"
+            echo "  - $name: $license"
+        done
+        cat <<EOF
+
+Nmap's license explicitly permits linking with OpenSSL (NPSL section 11).
+
+Nmap is a trademark of Nmap Software LLC. This build is not affiliated with,
+sponsored by, or endorsed by Nmap Software LLC or the Nmap Project. Official
+Nmap releases are available from https://nmap.org/.
+
+This software comes with NO WARRANTY; see section 5 of the NPSL.
+EOF
+    } > "$doc/NOTICE"
+    chmod 644 -- "$doc"/*
+}
+
 CID=$(docker create --network=none -e PREFIX="$PREFIX" -e JOBS="$JOBS" \
       "$BUILDER_IMAGE" /bin/sh -c "$INNER_BUILD")
 
@@ -250,6 +352,9 @@ docker cp -q "$CID:/stage${PREFIX}/." "$TMP_OUT"
 chmod 755 "$TMP_OUT"   # mktemp creates it 0700
 
 "$TMP_OUT/bin/nmap" --version >/dev/null || die "the built nmap does not run on this host"
+
+log "installing license documentation into share/doc/nmap"
+install_license_docs "$TMP_OUT"
 
 cat > "$TMP_OUT/$MARKER" <<EOF
 # Created by $(basename "$0"). Its presence lets --force replace this directory.

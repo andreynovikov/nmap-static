@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# Copyright (c) 2026 Andrey Novikov
+# Licensed under the Nmap Public Source License v0.95; see LICENSE and NOTICE.
+#
 # Print the latest stable nmap version announced on https://nmap.org/download.html
 # (the "Latest stable Nmap release tarball" link). Fails loudly if the page
 # no longer looks as expected, so a format change never goes unnoticed.

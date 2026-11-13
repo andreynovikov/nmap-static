@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Andrey Novikov
+# Licensed under the Nmap Public Source License v0.95; see LICENSE and NOTICE.
+
 name: Static nmap release
 
 # Once a day, and whenever the pins in download_sources.sh change on main:
@@ -126,7 +129,12 @@ jobs:
           rm "staging/nmap-$VERSION/.build-info"
           tar -C staging --owner=0 --group=0 --numeric-owner \
             -czf "dist/$DIST_NAME.tar.gz" "nmap-$VERSION"
-          (cd dist && sha256sum -- "$DIST_NAME.tar.gz" > SHA256SUMS)
+          # The exact source code the binaries were built from goes next to
+          # them (the NPSL, like the GPL, requires access to the source).
+          openssl=$(sed -n 's/^OPENSSL_VERSION=//p' download_sources.sh)
+          cp "sources/nmap-$VERSION.tar.bz2" "sources/nmap-$VERSION.tar.bz2.asc" \
+            "sources/openssl-$openssl.tar.gz" dist/
+          (cd dist && sha256sum -- *.tar.* > SHA256SUMS)
           cat dist/SHA256SUMS
 
       - name: Attest build provenance
@@ -157,7 +165,7 @@ jobs:
           sed -e "s|@VERSION@|$VERSION|g" -e "s|@OPENSSL@|$openssl|g" \
               -e "s|@ALPINE@|$alpine|g" -e "s|@NAME@|$DIST_NAME|g" \
               -e "s|@REPO@|$GITHUB_REPOSITORY|g" -e "s|@INPUTS@|$INPUTS|g" \
-              -e "s|@REBUILD@|$rebuild|" > notes.md <<'EOF'
+              -e "s|@TAG@|$TAG|g" -e "s|@REBUILD@|$rebuild|" > notes.md <<'EOF'
           Statically linked **nmap**, **ncat** and **nping** @VERSION@ for x86_64 Linux,
           built from the official nmap.org release (GPG signature checked) with
           [`build_nmap_static.sh`](https://github.com/@REPO@/blob/main/build_nmap_static.sh). They have no runtime
@@ -183,11 +191,26 @@ jobs:
           ### Verify
 
           ```sh
-          sha256sum -c SHA256SUMS
+          sha256sum -c --ignore-missing SHA256SUMS
           gh attestation verify @NAME@.tar.gz -R @REPO@
           ```
 
           The `gh attestation` check needs GitHub CLI 2.49 or newer.
+
+          ### Source code and license
+
+          Nmap is licensed under the [Nmap Public Source License](https://nmap.org/npsl/)
+          (NPSL v0.95). The archive includes that license, a NOTICE and the licenses
+          of all statically linked libraries in `share/doc/nmap/`.
+
+          This release also carries the exact, unmodified source code the binaries
+          were built from: `nmap-@VERSION@.tar.bz2` (the official nmap.org release)
+          with its GPG signature, and `openssl-@OPENSSL@.tar.gz`. The build scripts
+          are in this repository at tag [`@TAG@`](https://github.com/@REPO@/tree/@TAG@).
+
+          This is an unofficial build. It is not affiliated with, sponsored by, or
+          endorsed by Nmap Software LLC or the Nmap Project. Nmap is a trademark of
+          Nmap Software LLC.
 
           <!-- build-inputs: @INPUTS@ -->
           EOF
@@ -202,5 +225,6 @@ jobs:
           # Upload as a draft first, so a failed upload never looks like a finished build.
           gh release create "$TAG" --draft --target "$GITHUB_SHA" \
             --title "Nmap $TAG (static)" --notes-file notes.md \
-            "dist/$DIST_NAME.tar.gz" dist/SHA256SUMS
+            "dist/$DIST_NAME.tar.gz" dist/SHA256SUMS "dist/nmap-$VERSION.tar.bz2" \
+            "dist/nmap-$VERSION.tar.bz2.asc" "dist/openssl-$openssl.tar.gz"
           gh release edit "$TAG" --draft=false --latest="$IS_LATEST"

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# Copyright (c) 2026 Andrey Novikov
+# Licensed under the Nmap Public Source License v0.95; see LICENSE and NOTICE.
+#
 # Smoke-test a static nmap build:
 #
 #   test_nmap_static.sh OUTPUT_DIR        e.g. output/7.993
@@ -66,6 +69,14 @@ done
 
 check "nmap --version: all features compiled in" "$("$B/nmap" --version)" \
     'openssl-[0-9]' 'libssh2' 'nmap-liblua' '^Compiled without:[[:space:]]*$'
+
+# Redistribution needs Nmap's license and the third-party notices with the binaries.
+DOC="$B/../share/doc/nmap"
+check "license documentation in share/doc/nmap" \
+    "$(head -n 1 "$DOC/LICENSE" 2>&1; grep -h '' "$DOC/NOTICE" "$DOC/THIRD-PARTY-LICENSES" 2>&1)" \
+    '^Nmap Public Source License' 'not affiliated with' \
+    '^OpenSSL .*' '^libpcap' '^libdnet' '^PCRE2' '^libssh2' '^LIBLINEAR' '^Lua ' '^LPeg' \
+    '^zlib' '^musl libc' '^libgcc, libstdc\+\+' 'GCC RUNTIME LIBRARY EXCEPTION'
 
 # ---------------------------------------------------------- test services --
 

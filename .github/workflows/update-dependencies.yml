@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Andrey Novikov
+# Licensed under the Nmap Public Source License v0.95; see LICENSE and NOTICE.
+
 name: Dependency updates
 
 # Daily: look for new patch releases of the build inputs pinned in
