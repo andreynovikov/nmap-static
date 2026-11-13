@@ -1,0 +1,198 @@
+name: Static nmap release
+
+# Once a day: look up the latest stable nmap release on nmap.org and, unless a
+# GitHub release with that version already exists here, build it as a static
+# binary, test it, and publish output/<version>/ as release <version>.
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'nmap version to build (empty: latest stable release on nmap.org)'
+        type: string
+        required: false
+        default: ''
+      publish:
+        description: 'Publish a GitHub release (off: build and test only)'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+# One run at a time; a second run waits instead of building the same release.
+concurrency:
+  group: static-nmap-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  # Scheduled runs have no inputs and always publish.
+  PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write   # keepalive: re-enable this workflow
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_latest: ${{ steps.version.outputs.is_latest }}
+      build: ${{ steps.release.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # GitHub disables scheduled workflows in public repositories after 60
+      # days without activity; re-enabling through the API is meant to keep
+      # the daily check alive without dummy commits (best effort).
+      - name: Keep the daily schedule enabled
+        if: github.event_name == 'schedule'
+        run: |
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/enable" \
+            || echo "::warning::could not re-enable the workflow"
+
+      - name: Determine the nmap version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          latest=$(.github/scripts/latest-nmap-version.sh)
+          version=${INPUT_VERSION:-$latest}
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+[A-Za-z0-9]*$ ]]; then
+            echo "::error::invalid nmap version '$version'"; exit 1
+          fi
+          echo "Latest stable nmap release: $latest; selected: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "is_latest=$([ "$version" = "$latest" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Look for an existing release
+        id: release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if draft=$(gh release view "$VERSION" --json isDraft --jq .isDraft 2>err.txt); then
+            if [ "$draft" = true ]; then
+              echo "Release $VERSION exists only as an unfinished draft: building."
+            elif [ "$PUBLISH" = true ]; then
+              echo "Release $VERSION is already published: nothing to do."
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            else
+              echo "Release $VERSION is already published; building anyway (dry run)."
+            fi
+          elif grep -q 'release not found' err.txt; then
+            echo "No release $VERSION yet: building."
+          else
+            cat err.txt; exit 1
+          fi
+          echo "build=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write      # create the release
+      id-token: write      # build provenance attestation
+      attestations: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      DIST_NAME: nmap-${{ needs.check.outputs.version }}-linux-x86_64-static
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download sources
+        run: ./download_sources.sh --nmap-version "$VERSION"
+
+      - name: Build
+        run: |
+          shopt -s nullglob
+          openssl=(sources/openssl-*/) alpine=(sources/alpine-*/)
+          if [ ${#openssl[@]} -ne 1 ] || [ ${#alpine[@]} -ne 1 ]; then
+            echo "::error::expected exactly one OpenSSL and one Alpine directory in sources/"; exit 1
+          fi
+          ./build_nmap_static.sh --prefix /usr/local --alpine "${alpine[0]%/}" \
+            "sources/nmap-$VERSION" "${openssl[0]%/}"
+
+      - name: Test
+        run: ./test_nmap_static.sh "output/$VERSION"
+
+      - name: Package
+        run: |
+          mkdir -p staging dist
+          cp -a "output/$VERSION" "staging/nmap-$VERSION"
+          # Build details go into the release notes; inside the archive the
+          # file would end up as /usr/local/.build-info.
+          rm "staging/nmap-$VERSION/.build-info"
+          tar -C staging --owner=0 --group=0 --numeric-owner \
+            -czf "dist/$DIST_NAME.tar.gz" "nmap-$VERSION"
+          (cd dist && sha256sum -- "$DIST_NAME.tar.gz" > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Attest build provenance
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/${{ env.DIST_NAME }}.tar.gz
+
+      - name: Publish release
+        if: env.PUBLISH == 'true'
+        env:
+          IS_LATEST: ${{ needs.check.outputs.is_latest }}
+        run: |
+          info="output/$VERSION/.build-info"
+          openssl=$(sed -n 's/^openssl_version=//p' "$info")
+          alpine=$(sed -n 's/^alpine_version=//p' "$info")
+          sed -e "s|@VERSION@|$VERSION|g" -e "s|@OPENSSL@|$openssl|g" \
+              -e "s|@ALPINE@|$alpine|g" -e "s|@NAME@|$DIST_NAME|g" \
+              -e "s|@REPO@|$GITHUB_REPOSITORY|g" > notes.md <<'EOF'
+          Statically linked **nmap**, **ncat** and **nping** @VERSION@ for x86_64 Linux,
+          built from the official nmap.org release (GPG signature checked) with
+          [`build_nmap_static.sh`](https://github.com/@REPO@/blob/main/build_nmap_static.sh). They have no runtime
+          dependencies: musl libc, OpenSSL, libssh2, Lua/NSE and libpcap are all built in.
+
+          | Component | Version |
+          |---|---|
+          | nmap | @VERSION@ |
+          | OpenSSL | @OPENSSL@, with the legacy provider (MD4, DES, RC4) built in for NSE |
+          | Alpine Linux (build environment) | @ALPINE@ |
+
+          ### Install
+
+          ```sh
+          sudo tar -C /usr/local --strip-components=1 -xzf @NAME@.tar.gz
+          ```
+
+          Or unpack the archive anywhere and run `nmap-@VERSION@/bin/nmap`; nmap finds its
+          scripts and data next to the binary.
+
+          ### Verify
+
+          ```sh
+          sha256sum -c SHA256SUMS
+          gh attestation verify @NAME@.tar.gz -R @REPO@
+          ```
+          EOF
+
+          # Never touch a published release; replace a leftover draft.
+          if draft=$(gh release view "$VERSION" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::release $VERSION is already published"; exit 1
+            fi
+            gh release delete "$VERSION" --yes --cleanup-tag
+          fi
+          # Upload as a draft first, so a failed upload never looks like a finished build.
+          gh release create "$VERSION" --draft --target "$GITHUB_SHA" \
+            --title "Nmap $VERSION (static, linux x86_64)" --notes-file notes.md \
+            "dist/$DIST_NAME.tar.gz" dist/SHA256SUMS
+          gh release edit "$VERSION" --draft=false --latest="$IS_LATEST"
