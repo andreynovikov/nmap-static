@@ -182,6 +182,8 @@ jobs:
           sha256sum -c SHA256SUMS
           gh attestation verify @NAME@.tar.gz -R @REPO@
           ```
+
+          The `gh attestation` check needs GitHub CLI 2.49 or newer.
           EOF
 
           # Never touch a published release; replace a leftover draft.

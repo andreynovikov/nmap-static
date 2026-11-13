@@ -30,7 +30,8 @@ gh attestation verify nmap-7.993-linux-x86_64-static.tar.gz -R andreynovikov/nma
 ```
 
 The second command checks GitHub's signed build provenance. It proves the
-archive came from this repository's workflow.
+archive came from this repository's workflow, and needs GitHub CLI 2.49 or
+newer.
 
 ## How releases are made
 
