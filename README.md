@@ -12,7 +12,9 @@ including ones without glibc.
 ## Download
 
 Get the archive from [Releases](https://github.com/andreynovikov/nmap-static/releases).
-Each release is tagged with the nmap version it was built from.
+Each release is tagged with the nmap version it was built from, such as `7.993`.
+When OpenSSL or Alpine gets an update, the same nmap version is rebuilt and
+published with a build number: `7.993-2`, `7.993-3`, and so on.
 
 ```sh
 sudo tar -C /usr/local --strip-components=1 -xzf nmap-7.993-linux-x86_64-static.tar.gz
@@ -37,12 +39,18 @@ newer.
 
 ## How releases are made
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) runs daily:
+[`.github/workflows/release.yml`](.github/workflows/release.yml) runs daily,
+and also whenever the pins in `download_sources.sh` change on `main`:
 
 1. It reads the latest stable version from https://nmap.org/download.html.
-2. If a release with that version already exists, it stops.
-3. Otherwise it downloads the sources and checks the nmap tarball's GPG
-   signature against the Nmap Project Signing Key.
+2. It decides whether to build ([`plan-release.sh`](.github/scripts/plan-release.sh)):
+   - **no release of that version yet:** a first build, tagged `7.993`;
+   - **the newest release was built with different OpenSSL or Alpine pins:**
+     a rebuild, tagged `7.993-2` and so on (each release records its build
+     inputs in a hidden comment in its notes);
+   - **otherwise:** nothing to do.
+3. It downloads the sources and checks the nmap tarball's GPG signature
+   against the Nmap Project Signing Key.
 4. It builds with `--prefix /usr/local`, runs `test_nmap_static.sh`, and
    publishes the archive and `SHA256SUMS` as a new release.
 
@@ -52,13 +60,36 @@ You can also run the workflow manually from the Actions tab:
 - `version` builds a specific nmap release.
 - Turning `publish` off builds and tests without releasing.
 
-To rebuild an existing release, delete it and run the workflow. Changing the
-OpenSSL or Alpine pins doesn't rebuild existing releases on its own.
+## Dependency updates
+
+[`.github/workflows/update-dependencies.yml`](.github/workflows/update-dependencies.yml)
+runs daily and looks for new patch releases of the pinned build inputs: OpenSSL
+in its 3.5 LTS line, and the Alpine 3.22 branch. When it finds one, it
+([`update-dependency.sh`](.github/scripts/update-dependency.sh)):
+
+1. downloads the new release and checks its SHA-256 against every published
+   checksum (GitHub and openssl.org; Alpine's release index and `.sha256` file);
+2. updates the pin in `download_sources.sh` and the version mentions in the docs;
+3. test-builds the latest nmap release with it and runs `test_nmap_static.sh`;
+4. opens a pull request, only if the test build passed.
+
+Merging that pull request triggers the release workflow, which publishes the
+rebuild. Moving to a new OpenSSL or Alpine line (3.6, 3.23, ...) stays a manual
+change of the pins at the top of `download_sources.sh`.
+
+Dependabot can't track versions pinned in a shell script. It keeps the GitHub
+Actions used by the workflows up to date instead ([`.github/dependabot.yml`](.github/dependabot.yml)).
+
+After an Alpine update, delete your local `sources/alpine-3.22` before running
+`download_sources.sh` again: its build packages belong to the old Alpine
+release. The script stops with that hint rather than mixing them.
+
+## Keeping the schedules alive
 
 GitHub disables scheduled workflows in public repositories after 60 days
-without activity. The workflow re-enables itself on every run to prevent that.
-GitHub doesn't document whether this resets the timer; if it doesn't, GitHub
-emails a warning first, and one click re-enables the workflow.
+without activity. Both workflows re-enable themselves on every scheduled run
+to prevent that. GitHub doesn't document whether this resets the timer; if it
+doesn't, GitHub emails a warning first, and one click re-enables the workflow.
 
 ## Building it yourself
 

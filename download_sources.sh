@@ -173,6 +173,10 @@ if [ -f "$ROOTFS" ]; then
         || die "$ROOTFS does not match its pinned SHA-256; move it away and re-run"
     SUMMARY+=("present     $ROOTFS")
 else
+    # After the Alpine pin changes, the old minirootfs and the packages
+    # fetched for it must not be mixed with the new release.
+    OLD_ROOTFS=$(compgen -G "$ALPINE_DIR/alpine-minirootfs-*-x86_64.tar.gz" | head -n 1 || true)
+    [ -z "$OLD_ROOTFS" ] || die "$ALPINE_DIR holds $(basename -- "$OLD_ROOTFS"), but Alpine $ALPINE_VERSION is pinned now; delete $ALPINE_DIR and re-run"
     log "downloading $ROOTFS_URL"
     download "$ROOTFS_URL" "$WORK/$ROOTFS_NAME" || die "download failed: $ROOTFS_URL"
     verify_sha256 "$ALPINE_SHA256" "$WORK/$ROOTFS_NAME"

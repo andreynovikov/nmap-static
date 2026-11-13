@@ -1,12 +1,19 @@
 name: Static nmap release
 
-# Once a day: look up the latest stable nmap release on nmap.org and, unless a
-# GitHub release with that version already exists here, build it as a static
-# binary, test it, and publish output/<version>/ as release <version>.
+# Once a day, and whenever the pins in download_sources.sh change on main:
+# look up the latest stable nmap release on nmap.org and build it as a static
+# binary when
+#   - this repository has no release of that version yet (tag: 7.993), or
+#   - the OpenSSL/Alpine versions pinned in download_sources.sh differ from
+#     the ones its newest release was built with (rebuild: 7.993-2, -3, ...).
+# The build is tested, then published with SHA256SUMS and an attestation.
 
 on:
   schedule:
     - cron: '23 5 * * *'
+  push:
+    branches: [main]
+    paths: [download_sources.sh]
   workflow_dispatch:
     inputs:
       version:
@@ -35,8 +42,8 @@ defaults:
 env:
   GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
-  # Scheduled runs have no inputs and always publish.
-  PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+  # Scheduled and push runs have no inputs and always publish.
+  PUBLISH: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
 
 jobs:
   check:
@@ -47,7 +54,11 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       is_latest: ${{ steps.version.outputs.is_latest }}
-      build: ${{ steps.release.outputs.build }}
+      build: ${{ steps.plan.outputs.build }}
+      tag: ${{ steps.plan.outputs.tag }}
+      previous_tag: ${{ steps.plan.outputs.previous_tag }}
+      inputs: ${{ steps.plan.outputs.inputs }}
+      previous_inputs: ${{ steps.plan.outputs.previous_inputs }}
     steps:
       - uses: actions/checkout@v7
 
@@ -74,27 +85,18 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "is_latest=$([ "$version" = "$latest" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      - name: Look for an existing release
-        id: release
+      - name: Plan the release
+        id: plan
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if draft=$(gh release view "$VERSION" --json isDraft --jq .isDraft 2>err.txt); then
-            if [ "$draft" = true ]; then
-              echo "Release $VERSION exists only as an unfinished draft: building."
-            elif [ "$PUBLISH" = true ]; then
-              echo "Release $VERSION is already published: nothing to do."
-              echo "build=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            else
-              echo "Release $VERSION is already published; building anyway (dry run)."
-            fi
-          elif grep -q 'release not found' err.txt; then
-            echo "No release $VERSION yet: building."
-          else
-            cat err.txt; exit 1
+          plan=$(.github/scripts/plan-release.sh "$VERSION")
+          echo "$plan"
+          if [ "$PUBLISH" != true ]; then
+            echo "Dry run: building regardless of the plan."
+            plan=$(grep -v '^build=' <<<"$plan"; echo build=true)
           fi
-          echo "build=true" >> "$GITHUB_OUTPUT"
+          echo "$plan" >> "$GITHUB_OUTPUT"
 
   build:
     needs: check
@@ -107,25 +109,13 @@ jobs:
       attestations: write
     env:
       VERSION: ${{ needs.check.outputs.version }}
-      DIST_NAME: nmap-${{ needs.check.outputs.version }}-linux-x86_64-static
+      TAG: ${{ needs.check.outputs.tag }}
+      DIST_NAME: nmap-${{ needs.check.outputs.tag }}-linux-x86_64-static
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download sources
-        run: ./download_sources.sh --nmap-version "$VERSION"
-
-      - name: Build
-        run: |
-          shopt -s nullglob
-          openssl=(sources/openssl-*/) alpine=(sources/alpine-*/)
-          if [ ${#openssl[@]} -ne 1 ] || [ ${#alpine[@]} -ne 1 ]; then
-            echo "::error::expected exactly one OpenSSL and one Alpine directory in sources/"; exit 1
-          fi
-          ./build_nmap_static.sh --prefix /usr/local --alpine "${alpine[0]%/}" \
-            "sources/nmap-$VERSION" "${openssl[0]%/}"
-
-      - name: Test
-        run: ./test_nmap_static.sh "output/$VERSION"
+      - name: Build and test
+        run: .github/scripts/build-and-test.sh "$VERSION"
 
       - name: Package
         run: |
@@ -149,17 +139,31 @@ jobs:
         if: env.PUBLISH == 'true'
         env:
           IS_LATEST: ${{ needs.check.outputs.is_latest }}
+          INPUTS: ${{ needs.check.outputs.inputs }}
+          PREVIOUS_TAG: ${{ needs.check.outputs.previous_tag }}
+          PREVIOUS_INPUTS: ${{ needs.check.outputs.previous_inputs }}
         run: |
           info="output/$VERSION/.build-info"
           openssl=$(sed -n 's/^openssl_version=//p' "$info")
           alpine=$(sed -n 's/^alpine_version=//p' "$info")
+          # The recorded inputs must describe what was actually built.
+          if [ "$INPUTS" != "openssl=$openssl alpine=$alpine" ]; then
+            echo "::error::built with openssl=$openssl alpine=$alpine, planned $INPUTS"; exit 1
+          fi
+          rebuild=""
+          if [ -n "$PREVIOUS_TAG" ]; then
+            rebuild="Rebuild of $PREVIOUS_TAG with updated dependencies: \`$PREVIOUS_INPUTS\` → \`$INPUTS\`."
+          fi
           sed -e "s|@VERSION@|$VERSION|g" -e "s|@OPENSSL@|$openssl|g" \
               -e "s|@ALPINE@|$alpine|g" -e "s|@NAME@|$DIST_NAME|g" \
-              -e "s|@REPO@|$GITHUB_REPOSITORY|g" > notes.md <<'EOF'
+              -e "s|@REPO@|$GITHUB_REPOSITORY|g" -e "s|@INPUTS@|$INPUTS|g" \
+              -e "s|@REBUILD@|$rebuild|" > notes.md <<'EOF'
           Statically linked **nmap**, **ncat** and **nping** @VERSION@ for x86_64 Linux,
           built from the official nmap.org release (GPG signature checked) with
           [`build_nmap_static.sh`](https://github.com/@REPO@/blob/main/build_nmap_static.sh). They have no runtime
           dependencies: musl libc, OpenSSL, libssh2, Lua/NSE and libpcap are all built in.
+
+          @REBUILD@
 
           | Component | Version |
           |---|---|
@@ -184,17 +188,19 @@ jobs:
           ```
 
           The `gh attestation` check needs GitHub CLI 2.49 or newer.
+
+          <!-- build-inputs: @INPUTS@ -->
           EOF
 
           # Never touch a published release; replace a leftover draft.
-          if draft=$(gh release view "$VERSION" --json isDraft --jq .isDraft 2>/dev/null); then
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             if [ "$draft" != true ]; then
-              echo "::error::release $VERSION is already published"; exit 1
+              echo "::error::release $TAG is already published"; exit 1
             fi
-            gh release delete "$VERSION" --yes --cleanup-tag
+            gh release delete "$TAG" --yes --cleanup-tag
           fi
           # Upload as a draft first, so a failed upload never looks like a finished build.
-          gh release create "$VERSION" --draft --target "$GITHUB_SHA" \
-            --title "Nmap $VERSION (static)" --notes-file notes.md \
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" \
+            --title "Nmap $TAG (static)" --notes-file notes.md \
             "dist/$DIST_NAME.tar.gz" dist/SHA256SUMS
-          gh release edit "$VERSION" --draft=false --latest="$IS_LATEST"
+          gh release edit "$TAG" --draft=false --latest="$IS_LATEST"

@@ -1,0 +1,95 @@
+name: Dependency updates
+
+# Daily: look for new patch releases of the build inputs pinned in
+# download_sources.sh (OpenSSL in its LTS line, Alpine in its branch). For
+# each one, verify its checksum, update the pin, test-build the latest nmap
+# release with it, and open a pull request. Merging that pull request makes
+# the release workflow publish a rebuild.
+#
+# Dependabot can't track these pins; it keeps the GitHub Actions up to date
+# instead (.github/dependabot.yml).
+
+on:
+  schedule:
+    - cron: '47 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-updates
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  # GitHub disables scheduled workflows in public repositories after 60 days
+  # without activity; re-enabling through the API is meant to prevent that.
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the daily schedule enabled
+        run: |
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/update-dependencies.yml/enable" \
+            || echo "::warning::could not re-enable the workflow"
+
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write        # push the update branch
+      pull-requests: write   # open the pull request
+    strategy:
+      fail-fast: false
+      matrix:
+        dependency: [openssl, alpine]
+    env:
+      PR_BODY_FILE: ${{ github.workspace }}/../pr-body.md
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Look for a newer release
+        id: update
+        run: .github/scripts/update-dependency.sh "${{ matrix.dependency }}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already proposed
+        id: proposed
+        if: steps.update.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.update.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            echo "Branch $BRANCH exists: this update was already proposed."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test build with the update
+        if: steps.update.outputs.changed == 'true' && steps.proposed.outputs.skip == 'false'
+        run: .github/scripts/build-and-test.sh "$(.github/scripts/latest-nmap-version.sh)"
+
+      - name: Open a pull request
+        if: steps.update.outputs.changed == 'true' && steps.proposed.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.update.outputs.branch }}
+          TITLE: ${{ steps.update.outputs.title }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add download_sources.sh README.md build_nmap_static.sh
+          git commit -m "$TITLE"
+          git push origin "$BRANCH"
+          gh pr create --base "$GITHUB_REF_NAME" --head "$BRANCH" \
+            --title "$TITLE" --body-file "$PR_BODY_FILE"

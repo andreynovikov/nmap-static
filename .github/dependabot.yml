@@ -1,0 +1,10 @@
+# Dependabot keeps the GitHub Actions used by the workflows up to date.
+# The OpenSSL and Alpine pins in download_sources.sh are tracked by
+# .github/workflows/update-dependencies.yml instead: Dependabot has no
+# ecosystem for versions pinned in shell scripts.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
